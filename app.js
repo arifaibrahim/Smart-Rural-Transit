@@ -1,33 +1,30 @@
-// --- Persistent State ---
 let routes = JSON.parse(localStorage.getItem("rl_routes")) || structuredClone(INITIAL_ROUTES);
 let depots = JSON.parse(localStorage.getItem("rl_depots")) || structuredClone(INITIAL_DEPOTS);
 let blockedEdges = JSON.parse(localStorage.getItem("rl_blocked_edges")) || [];
 let demandSurge = JSON.parse(localStorage.getItem("rl_surge")) || false;
+let congestionLevel = localStorage.getItem("rl_congestion") || "clear"; // clear | moderate | heavy
 let examUrgency = JSON.parse(localStorage.getItem("rl_exam_urgency")) || false;
 let ticketMode = localStorage.getItem("rl_ticket_mode") || "";
 let boardedBuses = JSON.parse(localStorage.getItem("rl_boarded")) || {};
 let waitingUserStops = JSON.parse(localStorage.getItem("rl_waiting")) || {};
 let alertsLog = JSON.parse(localStorage.getItem("rl_alerts")) || [];
-let ksrtcAuthed = sessionStorage.getItem("rl_ksrtc_auth") === "true";
 
 let busPositions = {};
 let map, busMarkers = {}, activePolyline = null, floodLayer = null;
 
-// --- Time Helpers ---
 function toMins(hhmm) { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; }
 function fromMins(m) {
   const safe = ((m % 1440) + 1440) % 1440;
   const hh = Math.floor(safe / 60), mm = safe % 60;
   return `${hh % 12 || 12}:${String(mm).padStart(2, "0")} ${hh >= 12 ? "PM" : "AM"}`;
 }
-function haversineKm(a, b) {
-  const toRad = d => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
-  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+function getCongestionDelay() {
+  if (congestionLevel === "heavy") return 25;
+  if (congestionLevel === "moderate") return 12;
+  return 0;
 }
 
-// --- Road Detour & Blockage Engine ---
+// --- Detour Engine ---
 function isEdgeBlocked(u, v) {
   return blockedEdges.includes(`${u}__${v}`) || blockedEdges.includes(`${v}__${u}`);
 }
@@ -43,7 +40,6 @@ function findDetourPath(u, v) {
   });
   EXTRA_ROAD_LINKS.forEach(([x, y, w]) => addLink(x, y, w));
 
-  // Dijkstra shortest unblocked detour from u to v
   const dist = { [u]: 0 }, prev = {}, pq = [[0, u]];
   while (pq.length) {
     pq.sort((a, b) => a[0] - b[0]);
@@ -65,9 +61,8 @@ function findDetourPath(u, v) {
   while (c) { path.unshift(c); c = prev[c]; }
   return { path, extraMins: Math.max(10, dist[v] - 12) };
 }
-
 function getEffectiveRouteStops(route) {
-  let effective = [route.stops[0]], extraMins = 0, detoured = false;
+  let effective = [route.stops[0]], extraMins = getCongestionDelay(), detoured = false;
   for (let i = 0; i < route.stops.length - 1; i++) {
     const u = route.stops[i], v = route.stops[i + 1];
     if (isEdgeBlocked(u, v)) {
@@ -86,7 +81,6 @@ function getEffectiveRouteStops(route) {
   }
   return { stops: effective, extraMins, detoured };
 }
-
 function getStopTime(route, stopIdx, totalStops, extraMins = 0) {
   const start = toMins(route.dep);
   const end = toMins(route.arr) + extraMins;
@@ -94,59 +88,51 @@ function getStopTime(route, stopIdx, totalStops, extraMins = 0) {
   return Math.round(start + (end - start) * ratio);
 }
 
-// --- Exact 3-Tier Crowd Logic + 40% Demand Surge ---
+// --- Exact 3-Tier Crowd Logic ---
 function getCrowdInfo(route) {
   if (route.cancelled) {
-    return {
-      total: 0, pct: 0, surgePct: 0, label: "BROKEN DOWN / UNAVAILABLE",
-      badgeClass: "bg-slate-900 text-rose-300 border-slate-700", dotColor: "#475569", risk: true
-    };
+    return { total: 0, pct: 0, label: "BROKEN DOWN / UNAVAILABLE", badgeClass: "bg-slate-900 text-rose-300 border-slate-700", dotColor: "#475569", risk: true };
   }
-  const baseTotal = route.etmNormal + route.etmAadhaar + route.passCount;
+  const baseTotal = route.etmTickets + route.passCount;
   const total = demandSurge ? Math.round(baseTotal * 1.40) : baseTotal;
   const cap = route.cap;
   const overRatio = (total - cap) / cap;
   const pct = Math.round((total / cap) * 100);
 
   if (total < cap) {
-    return {
-      total, pct, label: `Empty / Seats Available (${total}/${cap} • ${pct}% Demand)`,
-      badgeClass: "bg-emerald-100 text-emerald-800 border-emerald-300", dotColor: "#10b981", risk: false
-    };
+    return { total, pct, label: `Empty / Seats Available (${total}/${cap} • ${pct}% Demand)`, badgeClass: "bg-emerald-100 text-emerald-800 border-emerald-300", dotColor: "#10b981", risk: false };
   }
   if (overRatio <= 0.40) {
     const tag = overRatio >= 0.10 ? "Moderate (10–40% Over)" : "Moderate (Near Capacity)";
-    return {
-      total, pct, label: `${tag} (${total}/${cap} • ${pct}% Demand)`,
-      badgeClass: "bg-amber-100 text-amber-800 border-amber-300", dotColor: "#f59e0b", risk: false
-    };
+    return { total, pct, label: `${tag} (${total}/${cap} • ${pct}% Demand)`, badgeClass: "bg-amber-100 text-amber-800 border-amber-300", dotColor: "#f59e0b", risk: false };
   }
-  return {
-    total, pct, label: `Fully Crowded (>40% Over • ${pct}% Demand)`,
-    badgeClass: "bg-rose-100 text-rose-800 border-rose-300", dotColor: "#e11d48", risk: true
-  };
+  return { total, pct, label: `Fully Crowded (>40% Over • ${pct}% Demand)`, badgeClass: "bg-rose-100 text-rose-800 border-rose-300", dotColor: "#e11d48", risk: true };
 }
 
-// --- Init ---
+// --- Init & Cross-Tab Sync with KSRTC Portal ---
 window.addEventListener("DOMContentLoaded", () => {
   populateDropdowns();
   initMap();
   if (!ticketMode) openModal("studentModal");
   updateHeaderBadges();
-  if (ksrtcAuthed) unlockKsrtcUI();
-
   routes.forEach((r, idx) => { busPositions[r.id] = (idx * 0.17) % 1; });
-  renderDepotControls();
-  renderRoadBlockControls();
   refreshAllViews();
   setInterval(tickGPS, 2000);
+});
+
+window.addEventListener("storage", () => {
+  routes = JSON.parse(localStorage.getItem("rl_routes")) || structuredClone(INITIAL_ROUTES);
+  depots = JSON.parse(localStorage.getItem("rl_depots")) || structuredClone(INITIAL_DEPOTS);
+  blockedEdges = JSON.parse(localStorage.getItem("rl_blocked_edges")) || [];
+  demandSurge = JSON.parse(localStorage.getItem("rl_surge")) || false;
+  congestionLevel = localStorage.getItem("rl_congestion") || "clear";
+  alertsLog = JSON.parse(localStorage.getItem("rl_alerts")) || [];
+  refreshAllViews();
 });
 
 function populateDropdowns() {
   const originEl = document.getElementById("originSelect");
   const collegeEl = document.getElementById("collegeSelect");
-  const simEl = document.getElementById("simBusSelect");
-  const roadEl = document.getElementById("roadBlockSelect");
 
   originEl.innerHTML = Object.values(STOPS).sort((a, b) => a.name.localeCompare(b.name))
     .map(s => `<option value="${s.id}">${s.name}</option>`).join("");
@@ -158,13 +144,10 @@ function populateDropdowns() {
   collegeEl.value = "st_aloysius";
   collegeEl.addEventListener("change", findRoutes);
 
-  simEl.innerHTML = routes.map(r => `<option value="${r.id}">${r.plate} — ${r.name}</option>`).join("");
-  roadEl.innerHTML = ROAD_SEGMENTS.map(s => `<option value="${s.id}">${s.label}</option>`).join("");
   document.getElementById("examUrgencyCheck").checked = examUrgency;
   updateWaitingUI();
 }
 
-// --- Modals & Auth ---
 function openModal(id) { document.getElementById(id).classList.remove("hidden"); }
 function closeModal(id) { document.getElementById(id).classList.add("hidden"); }
 
@@ -178,81 +161,39 @@ function saveStudentMode(mode) {
   updateHeaderBadges();
   refreshAllViews();
 }
-
 function toggleExamUrgency() {
   examUrgency = document.getElementById("examUrgencyCheck").checked;
   localStorage.setItem("rl_exam_urgency", JSON.stringify(examUrgency));
   refreshAllViews();
 }
-
-function handleKsrtcPortalButton() {
-  if (ksrtcAuthed) {
-    document.getElementById("ksrtcPortalSection").scrollIntoView({ behavior: "smooth" });
-  } else {
-    openModal("ksrtcLoginModal");
-  }
-}
-
-function handleKsrtcLogin(e) {
-  e.preventDefault();
-  const u = document.getElementById("ksrtcUser").value.trim();
-  const p = document.getElementById("ksrtcPass").value.trim();
-  if (u === "admin" && p === "admin") {
-    ksrtcAuthed = true;
-    sessionStorage.setItem("rl_ksrtc_auth", "true");
-    document.getElementById("ksrtcLoginError").classList.add("hidden");
-    closeModal("ksrtcLoginModal");
-    unlockKsrtcUI();
-    document.getElementById("ksrtcPortalSection").scrollIntoView({ behavior: "smooth" });
-  } else {
-    document.getElementById("ksrtcLoginError").classList.remove("hidden");
-  }
-}
-
-function unlockKsrtcUI() {
-  document.getElementById("ksrtcPortalSection").classList.remove("hidden");
-  document.getElementById("ksrtcHeaderBtn").textContent = "KSRTC Portal (Admin)";
-}
-function logoutKsrtc() {
-  ksrtcAuthed = false;
-  sessionStorage.removeItem("rl_ksrtc_auth");
-  document.getElementById("ksrtcPortalSection").classList.add("hidden");
-  document.getElementById("ksrtcHeaderBtn").textContent = "KSRTC Login";
-}
-
 function updateHeaderBadges() {
-  const labels = { pass: "Pass Mode", aadhaar: "Women Free (ETM)", normal: "Normal (ETM)" };
+  const labels = { pass: "Bus Pass", normal: "Normal (ETM)" };
   document.getElementById("studentHeaderBtn").textContent = ticketMode ? `Student: ${labels[ticketMode]}` : "Student Login";
-  document.getElementById("surgeToggleBtn").textContent = `+40% Demand Surge: ${demandSurge ? "ON" : "OFF"}`;
-}
-
-// --- Alerts System ---
-function pushAlert(type, title, msg) {
-  alertsLog.unshift({ id: Date.now() + Math.random(), type, title, msg, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
-  if (alertsLog.length > 25) alertsLog.pop();
-  saveState();
-  renderAlerts();
 }
 
 function renderAlerts() {
   const brokenCount = routes.filter(r => r.cancelled).length;
-  const activeCount = brokenCount + blockedEdges.length + (demandSurge ? 1 : 0);
+  const congActive = congestionLevel !== "clear" ? 1 : 0;
+  const activeCount = brokenCount + blockedEdges.length + (demandSurge ? 1 : 0) + congActive;
+
   document.getElementById("navAlertBadge").textContent = alertsLog.length;
-  document.getElementById("heroAlertText").textContent = `${activeCount} Active Crisis Alert(s)`;
+  document.getElementById("heroAlertText").textContent = `${activeCount} Active Alert(s)`;
   document.getElementById("heroLiveBusText").textContent = `${routes.filter(r => !r.cancelled).length} Buses Live`;
+  const congNames = { clear: "Traffic: Clear", moderate: "Traffic: Moderate (+12m)", heavy: "Traffic: Heavy (+25m)" };
+  document.getElementById("heroTrafficStatus").textContent = congNames[congestionLevel];
 
   const pill = document.getElementById("crisisStatusPill");
   if (activeCount > 0) {
-    pill.textContent = "CRISIS MODE ACTIVE";
+    pill.textContent = "CRISIS / DELAYS ACTIVE";
     pill.className = "ml-2 text-[10px] px-2 py-0.5 rounded-full bg-rose-500/30 text-rose-200 border border-rose-400/50";
   } else {
     pill.textContent = "NORMAL OPS";
-    pill.className = "ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30";
+    pill.className = "ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300";
   }
 
   const feed = document.getElementById("alertsFeedList");
   if (!alertsLog.length) {
-    feed.innerHTML = `<div class="p-4 bg-slate-50 rounded-xl text-xs text-slate-500">No active breakdowns or road closures reported yet.</div>`;
+    feed.innerHTML = `<div class="p-4 bg-slate-50 rounded-xl text-xs text-slate-500">No active disruptions or alerts.</div>`;
     return;
   }
   const styles = {
@@ -271,164 +212,18 @@ function renderAlerts() {
   `).join("");
 }
 
-// --- KSRTC Breakdown, Spare Bus Dispatch & Flood Controls ---
-function findNearestDepot(route) {
-  const [lat, lng] = getBusLatLng(route);
-  const pos = { lat, lng };
-  return depots.map(d => ({ depot: d, dist: haversineKm(pos, STOPS[d.stopId]) }))
-    .sort((a, b) => a.dist - b.dist)[0];
-}
-
-function reportBusBreakdown(specificId) {
-  const id = specificId || document.getElementById("simBusSelect").value;
-  const r = routes.find(x => x.id === id);
-  if (!r) return;
-  r.cancelled = !r.cancelled;
-  if (r.cancelled) {
-    const nearest = findNearestDepot(r);
-    const hasSpare = nearest.depot.spares.length > 0;
-    pushAlert("breakdown", `Bus Breakdown: ${r.plate}`,
-      `${r.name} is unavailable. Nearest station alerted: ${nearest.depot.name} (${nearest.dist.toFixed(1)} km away). ${hasSpare ? `Spare bus ready for dispatch.` : `NO SPARE BUS AVAILABLE — commuters shown live demand % on alternative buses.`}`
-    );
-  } else {
-    pushAlert("spare", `Bus Restored: ${r.plate}`, `${r.name} is back in active service.`);
-  }
-  saveState();
-  refreshAllViews();
-}
-
-function deploySpareBus(routeId, depotId) {
-  const broken = routes.find(r => r.id === routeId);
-  const depot = depots.find(d => d.id === depotId);
-  if (!broken || !depot || !depot.spares.length) return;
-  const sparePlate = depot.spares.shift();
-  const spareRoute = {
-    ...structuredClone(broken),
-    id: `SPARE_${Date.now()}`,
-    plate: `${sparePlate} (SPARE)`,
-    name: `[SPARE DISPATCH] ${broken.name}`,
-    etmNormal: 12, etmAadhaar: 6, passCount: 4, cancelled: false
-  };
-  routes.unshift(spareRoute);
-  busPositions[spareRoute.id] = 0.05;
-  pushAlert("spare", `Spare Bus Deployed: ${sparePlate}`,
-    `${depot.name} dispatched spare bus ${sparePlate} to cover broken-down ${broken.plate} (${broken.name}).`
-  );
-  saveState();
-  populateDropdowns();
-  refreshAllViews();
-}
-
-function renderDepotControls() {
-  const brokenList = routes.filter(r => r.cancelled);
-  const qEl = document.getElementById("depotDispatchQueue");
-  if (!brokenList.length) {
-    qEl.innerHTML = `<div class="text-slate-400">No broken-down buses awaiting spare dispatch.</div>`;
-  } else {
-    qEl.innerHTML = brokenList.map(b => {
-      const { depot, dist } = findNearestDepot(b);
-      const spareCount = depot.spares.length;
-      return `
-        <div class="p-2.5 bg-slate-900 rounded-xl border border-slate-700 space-y-1.5">
-          <div class="font-bold text-rose-300">${b.plate} Breakdown</div>
-          <div class="text-slate-300">Nearest: <b>${depot.name}</b> (${dist.toFixed(1)} km) — Spares: <b>${spareCount}</b></div>
-          ${spareCount > 0
-            ? `<button onclick="deploySpareBus('${b.id}','${depot.id}')" class="w-full bg-emerald-600 hover:bg-emerald-500 py-1.5 rounded-lg font-bold text-white">Deploy Spare Bus (${depot.spares[0]})</button>`
-            : `<div class="text-rose-400 font-bold">No Spare Bus Available — Showing Demand % on Alternate Buses</div>`
-          }
-        </div>`;
-    }).join("");
-  }
-  document.getElementById("depotInventorySummary").innerHTML = depots.map(d => `${d.name.split(" ")[0]}: <b>${d.spares.length}</b>`).join(" | ");
-}
-
-function toggleRoadBlock(specificSegId) {
-  const segId = specificSegId || document.getElementById("roadBlockSelect").value;
-  const seg = ROAD_SEGMENTS.find(s => s.id === segId);
-  const idx = blockedEdges.indexOf(segId);
-  if (idx > -1) {
-    blockedEdges.splice(idx, 1);
-    pushAlert("spare", `Road Reopened: ${seg.label}`, `Normal KSRTC corridor restored.`);
-  } else {
-    blockedEdges.push(segId);
-    const detour = findDetourPath(seg.a, seg.b);
-    const detourTxt = detour ? detour.path.map(id => STOPS[id].name).join(" → ") : "Nearest Hub Bypass";
-    pushAlert("flood", `Traffic Police Flood Closure: ${seg.label}`,
-      `Conductors instructed to take fastest alternative route: ${detourTxt}. Start 15 mins early.`
-    );
-  }
-  saveState();
-  refreshAllViews();
-}
-
-function renderRoadBlockControls() {
-  const el = document.getElementById("activeBlockedList");
-  if (!blockedEdges.length) {
-    el.innerHTML = `<span class="text-emerald-300">All district roads open.</span>`;
-  } else {
-    el.innerHTML = blockedEdges.map(id => {
-      const seg = ROAD_SEGMENTS.find(s => s.id === id);
-      return `<div>&#128679; Blocked: <b>${seg?.label || id}</b></div>`;
-    }).join("");
-  }
-}
-
-function toggleDemandSurge() {
-  demandSurge = !demandSurge;
-  if (demandSurge) pushAlert("surge", "Exam Day +40% Demand Surge Active", "Student rush increased by 40%. Live seat demand % updated across all routes.");
-  saveState();
-  updateHeaderBadges();
-  refreshAllViews();
-}
-
-function triggerExamDayCrisis() {
-  routes = structuredClone(INITIAL_ROUTES);
-  depots = structuredClone(INITIAL_DEPOTS);
-  // Scenario from PDF: 2 breakdowns + 40% demand surge + 1 flooded road + exam time pressure
-  routes[0].cancelled = true; // R01 Puttur->State Bank
-  routes[4].cancelled = true; // R05 Moodabidri->State Bank
-  blockedEdges = ["bc_road__kalladka"];
-  demandSurge = true;
-  examUrgency = true;
-  document.getElementById("examUrgencyCheck").checked = true;
-  alertsLog = [];
-  pushAlert("breakdown", "Breakdown 1: KA-19-F-3101 (Puttur–State Bank)", "Nearest station B.C. Road Counter alerted for spare bus dispatch.");
-  pushAlert("breakdown", "Breakdown 2: KA-19-F-3105 (Moodabidri–State Bank)", "Nearest station Moodabidri Counter alerted for spare bus dispatch.");
-  pushAlert("flood", "Road Flooded: B.C. Road ↔ Kalladka", "Traffic Police closed Panemangalore stretch. Buses rerouted via Kalladka → Vittla → Mudipu → B.C. Road.");
-  pushAlert("surge", "Exam Day Crisis: +40% Demand Surge", "Start early! +15 min precautionary exam buffer applied automatically.");
-  saveState();
-  updateHeaderBadges();
-  refreshAllViews();
-}
-
-function resetTelemetry() {
-  localStorage.clear();
-  routes = structuredClone(INITIAL_ROUTES);
-  depots = structuredClone(INITIAL_DEPOTS);
-  blockedEdges = [];
-  demandSurge = false;
-  examUrgency = false;
-  boardedBuses = {};
-  alertsLog = [];
-  document.getElementById("examUrgencyCheck").checked = false;
-  populateDropdowns();
-  updateHeaderBadges();
-  refreshAllViews();
-}
-
-// --- Waiting Beacon & ETM Simulator ---
 function updateWaitingUI() {
   const stopId = document.getElementById("originSelect").value;
   const stop = STOPS[stopId];
   const base = demandSurge ? Math.round((stop?.waitBase || 0) * 1.4) : (stop?.waitBase || 0);
   const count = base + (waitingUserStops[stopId] ? 1 : 0);
-  document.getElementById("waitingStopCount").textContent = `${count} students waiting at ${stop?.name}${examUrgency ? " (Exam Priority)" : ""}`;
+  document.getElementById("waitingStopCount").textContent = `${count} students waiting${examUrgency ? " (Exam Priority)" : ""}`;
   document.getElementById("waitBtn").textContent = waitingUserStops[stopId] ? "Waiting Signal Active (Tap to Cancel)" : "I'm Waiting at This Stop";
 }
 function toggleWaitingBeacon() {
   const stopId = document.getElementById("originSelect").value;
   waitingUserStops[stopId] = !waitingUserStops[stopId];
-  saveState();
+  localStorage.setItem("rl_waiting", JSON.stringify(waitingUserStops));
   updateWaitingUI();
   findRoutes();
 }
@@ -439,48 +234,40 @@ function applyPreset(originId, collegeId, time) {
   updateWaitingUI();
   findRoutes();
 }
-function simAddTicket(type, qty) {
-  const id = document.getElementById("simBusSelect").value;
-  const r = routes.find(x => x.id === id);
-  if (!r) return;
-  if (type === "aadhaar") r.etmAadhaar += qty; else r.etmNormal += qty;
-  saveState();
-  refreshAllViews();
-}
 function toggleBoarded(routeId) {
   const r = routes.find(x => x.id === routeId);
   if (!r) return;
   if (boardedBuses[routeId]) { r.passCount = Math.max(0, r.passCount - 1); delete boardedBuses[routeId]; }
   else { r.passCount += 1; boardedBuses[routeId] = true; }
-  saveState();
+  localStorage.setItem("rl_routes", JSON.stringify(routes));
+  localStorage.setItem("rl_boarded", JSON.stringify(boardedBuses));
   refreshAllViews();
 }
 
-// --- Routing Engine (Crisis-Aware + 15m Precautionary Buffer) ---
+// --- Routing Engine ---
 function findRoutes() {
   const originId = document.getElementById("originSelect").value;
   const collegeId = document.getElementById("collegeSelect").value;
   const college = INSTITUTIONS.find(c => c.id === collegeId);
   const destId = college.stopId;
   const rawTargetMins = toMins(document.getElementById("targetTimeInput").value || "09:15");
-  const hasCrisis = routes.some(r => r.cancelled) || blockedEdges.length > 0 || demandSurge;
+  const hasCrisis = routes.some(r => r.cancelled) || blockedEdges.length > 0 || demandSurge || congestionLevel !== "clear";
   const precautionaryAdded = examUrgency || hasCrisis;
   const effectiveTargetMins = precautionaryAdded ? rawTargetMins - 15 : rawTargetMins;
 
-  // Show/hide Precautionary Banner
   const pBanner = document.getElementById("precautionBanner");
   if (precautionaryAdded) {
     pBanner.classList.remove("hidden");
     document.getElementById("precautionTitle").textContent = hasCrisis
-      ? "Crisis Active: Start Earlier! (+15 Min Precautionary Time Added)"
+      ? "Disruption / Traffic Alert: Start Earlier! (+15 Min Precautionary Time Added)"
       : "Exam Priority Active (+15 Min Precautionary Safety Buffer)";
     document.getElementById("precautionDesc").textContent =
-      `Adjusted target arrival from ${fromMins(rawTargetMins)} to ${fromMins(effectiveTargetMins)} so you reach ${college.name} safely despite delays or detours.`;
+      `Target adjusted from ${fromMins(rawTargetMins)} to ${fromMins(effectiveTargetMins)} for ${college.name}.`;
   } else {
     pBanner.classList.add("hidden");
   }
   document.getElementById("effectiveTargetBadge").innerHTML =
-    `Target: <b>${fromMins(rawTargetMins)}</b> ${precautionaryAdded ? `<span class="text-amber-300">(Buffer: Reach by ${fromMins(effectiveTargetMins)})</span>` : ""}`;
+    `Target: <b>${fromMins(rawTargetMins)}</b> ${precautionaryAdded ? `<span class="text-amber-300">(Reach by ${fromMins(effectiveTargetMins)})</span>` : ""}`;
 
   if (originId === destId) {
     document.getElementById("directResults").innerHTML = `<div class="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-sm text-emerald-800">You are already at ${STOPS[destId].name}!</div>`;
@@ -505,7 +292,6 @@ function findRoutes() {
   });
   direct.sort((a, b) => b.score - a.score);
 
-  // Backup 1-Transfer Routes
   const backups = [];
   const seen = new Set();
   routes.forEach(r1 => {
@@ -546,24 +332,23 @@ function findRoutes() {
   backups.sort((a, b) => (b.onTime - a.onTime) || (a.finalArr - b.finalArr));
 
   renderDirect(direct, originId, destId, precautionaryAdded);
-  renderBackups(backups.slice(0, 5), originId, destId);
-  updateAIAdvisor(direct, backups, originId, college, effectiveTargetMins, precautionaryAdded);
+  renderBackups(backups.slice(0, 5));
+  updateAIAdvisor(direct, backups, originId, college, precautionaryAdded);
 }
 
 function renderDirect(list, originId, destId, precautionaryAdded) {
   const el = document.getElementById("directResults");
   document.getElementById("directCount").textContent = `${list.length} route(s)`;
   if (!list.length) {
-    el.innerHTML = `<div class="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-900">No direct active route connects <b>${STOPS[originId].name}</b> to <b>${STOPS[destId].name}</b>. See fastest 1-transfer backup routes below!</div>`;
+    el.innerHTML = `<div class="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-900">No direct bus connects <b>${STOPS[originId].name}</b> to <b>${STOPS[destId].name}</b>. Use a 1-Transfer Backup Route below!</div>`;
     return;
   }
   el.innerHTML = list.map(({ route: r, eff, depM, arrM, crowd, onTime }) => {
     const isBoarded = !!boardedBuses[r.id];
     const isSpare = r.plate.includes("SPARE");
-    const nearest = r.cancelled ? findNearestDepot(r) : null;
     const passBtn = ticketMode === "pass" && !r.cancelled
       ? `<button onclick="toggleBoarded('${r.id}')" class="px-3 py-1.5 rounded-xl text-xs font-bold ${isBoarded ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"}">${isBoarded ? "Boarded (Pass Checked-In)" : "I Boarded This Bus (Pass)"}</button>`
-      : `<span class="text-[11px] text-slate-500">ETM: ${r.etmNormal} Normal + ${r.etmAadhaar} Women Free | Pass: ${r.passCount}${demandSurge ? " (+40% Surge)" : ""}</span>`;
+      : `<span class="text-[11px] text-slate-500">ETM Tickets: ${r.etmTickets} | Bus Pass App: ${r.passCount}${demandSurge ? " (+40% Surge)" : ""}</span>`;
 
     return `
       <div class="bg-white rounded-2xl border ${r.cancelled ? "border-rose-300 bg-rose-50/40" : isSpare ? "border-emerald-400 bg-emerald-50/30" : "border-slate-200"} p-4 shadow-sm">
@@ -572,17 +357,16 @@ function renderDirect(list, originId, destId, precautionaryAdded) {
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-mono text-xs font-bold ${isSpare ? "bg-emerald-700" : "bg-slate-900"} text-white px-2.5 py-0.5 rounded-lg">${r.plate}</span>
               <span class="font-bold text-slate-900 text-sm">${r.name}</span>
-              ${eff.detoured && !r.cancelled ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Flood Detour (+${eff.extraMins}m)</span>` : ""}
+              ${eff.detoured && !r.cancelled ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Detour (+${eff.extraMins}m)</span>` : ""}
               ${!r.cancelled ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${onTime ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}">${onTime ? (precautionaryAdded ? "Safe w/ +15m Buffer" : "On Time") : "Arrives Late"}</span>` : ""}
             </div>
             <div class="text-xs text-slate-600 mt-1.5">
               Departs <b>${STOPS[originId].name}</b>: <b>${fromMins(depM)}</b> &rarr; Arrives <b>${STOPS[destId].name}</b>: <b>${fromMins(arrM)}</b>
             </div>
-            ${r.cancelled ? `<div class="text-xs text-rose-700 font-semibold mt-1">Breakdown Reported — Nearest Depot: ${nearest.depot.name} (${nearest.depot.spares.length > 0 ? `${nearest.depot.spares.length} Spare Ready` : "No Spare Available — Check Demand % on other buses"})</div>` : ""}
           </div>
           <span class="text-xs font-bold px-2.5 py-1 rounded-full border ${crowd.badgeClass}">${crowd.label}</span>
         </div>
-        ${crowd.risk && !r.cancelled ? `<div class="mt-2 text-xs bg-rose-50 text-rose-700 px-3 py-1.5 rounded-xl border border-rose-200 font-medium">Skip-Stop Risk (&gt;40% Over Capacity): Consider an earlier bus or 1-transfer backup below.</div>` : ""}
+        ${crowd.risk && !r.cancelled ? `<div class="mt-2 text-xs bg-rose-50 text-rose-700 px-3 py-1.5 rounded-xl border border-rose-200 font-medium">Skip-Stop Risk (&gt;40% Over Capacity) — consider an earlier bus or backup route.</div>` : ""}
         <div class="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
           ${passBtn}
           <button onclick="focusBus('${r.id}')" class="text-xs font-bold text-indigo-600 hover:underline">Track Live GPS</button>
@@ -594,14 +378,14 @@ function renderDirect(list, originId, destId, precautionaryAdded) {
 function renderBackups(list) {
   const el = document.getElementById("backupResults");
   if (!list.length) {
-    el.innerHTML = `<div class="p-4 bg-slate-100 border border-slate-200 rounded-2xl text-xs text-slate-700">No 1-transfer bus pairs in this window. Keep your <b>Waiting Beacon</b> active so KSRTC prioritizes a spare bus to your stop.</div>`;
+    el.innerHTML = `<div class="p-4 bg-slate-100 border border-slate-200 rounded-2xl text-xs text-slate-700">No 1-transfer pairs available in this window. Keep your Waiting Beacon active for priority relief.</div>`;
     return;
   }
   el.innerHTML = list.map(b => `
     <div class="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-        <span class="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full">Backup Transfer via ${STOPS[b.hubId].name}</span>
-        <span class="text-xs font-bold ${b.onTime ? "text-emerald-700" : "text-slate-500"}">Arrives ${fromMins(b.finalArr)} (${b.wait}m transfer)</span>
+        <span class="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full">Transfer via ${STOPS[b.hubId].name}</span>
+        <span class="text-xs font-bold ${b.onTime ? "text-emerald-700" : "text-slate-500"}">Arrives ${fromMins(b.finalArr)} (${b.wait}m wait)</span>
       </div>
       <div class="text-xs text-slate-700 space-y-1">
         <div><b>Leg 1:</b> <span class="font-mono font-bold">${b.r1.plate}</span> (${fromMins(b.depM)} &rarr; ${fromMins(b.hubArr)}) — <b>${b.c1.label}</b></div>
@@ -610,27 +394,26 @@ function renderBackups(list) {
     </div>`).join("");
 }
 
-function updateAIAdvisor(direct, backups, originId, college, effectiveTargetMins, precautionaryAdded) {
+function updateAIAdvisor(direct, backups, originId, college, precautionaryAdded) {
   const box = document.getElementById("aiAdvisorText");
   const best = direct.find(d => !d.route.cancelled && !d.crowd.risk && d.onTime) || direct.find(d => !d.route.cancelled && d.onTime);
   if (best) {
-    box.innerHTML = `Take <b>${best.route.plate}</b> at <b>${fromMins(best.depM)}</b> to reach <b>${college.name}</b> by <b>${fromMins(best.arrM)}</b> (${best.crowd.pct}% demand${precautionaryAdded ? ", clears +15m exam buffer" : ""}).`;
+    box.innerHTML = `Take <b>${best.route.plate}</b> at <b>${fromMins(best.depM)}</b> to reach <b>${college.name}</b> by <b>${fromMins(best.arrM)}</b> (${best.crowd.pct}% demand${precautionaryAdded ? ", clears +15m buffer" : ""}).`;
   } else if (backups.length) {
     const b = backups[0];
-    box.innerHTML = `Primary routes disrupted/crowded. <b>AI Exam Reroute:</b> Board <b>${b.r1.plate}</b> at <b>${fromMins(b.depM)}</b> &rarr; transfer at <b>${STOPS[b.hubId].name}</b> to <b>${b.r2.plate}</b> (Arrives ${fromMins(b.finalArr)}).`;
+    box.innerHTML = `Direct routes disrupted/full. <b>Backup Plan:</b> Take <b>${b.r1.plate}</b> at <b>${fromMins(b.depM)}</b> &rarr; transfer at <b>${STOPS[b.hubId].name}</b> to <b>${b.r2.plate}</b> (Arrives ${fromMins(b.finalArr)}).`;
   } else {
-    box.innerHTML = `Severe crisis on this corridor. Activate your <b>Waiting Beacon</b> at ${STOPS[originId].name} and notify KSRTC Depot for spare bus dispatch.`;
+    box.innerHTML = `High disruption on this route. Keep your Waiting Beacon active at ${STOPS[originId].name}.`;
   }
 }
 
-// --- Map & GPS Loop ---
+// --- Map ---
 function initMap() {
   map = L.map("map").setView([12.885, 75.05], 10);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap" }).addTo(map);
   floodLayer = L.layerGroup().addTo(map);
   Object.values(STOPS).forEach(s => {
-    L.circleMarker([s.lat, s.lng], { radius: 3.5, color: "#334155", fillColor: "#94a3b8", fillOpacity: 0.8, weight: 1 })
-      .bindTooltip(s.name).addTo(map);
+    L.circleMarker([s.lat, s.lng], { radius: 3.5, color: "#334155", fillColor: "#94a3b8", fillOpacity: 0.8, weight: 1 }).bindTooltip(s.name).addTo(map);
   });
 }
 function getBusLatLng(route) {
@@ -661,7 +444,7 @@ function updateMapMarkers() {
     const seg = ROAD_SEGMENTS.find(s => s.id === id);
     if (seg) {
       L.polyline([[STOPS[seg.a].lat, STOPS[seg.a].lng], [STOPS[seg.b].lat, STOPS[seg.b].lng]], { color: "#e11d48", weight: 6, opacity: 0.85 })
-        .bindTooltip(`FLOODED / BLOCKED: ${seg.label}`).addTo(floodLayer);
+        .bindTooltip(`CLOSED: ${seg.label}`).addTo(floodLayer);
     }
   });
 }
@@ -684,24 +467,12 @@ function focusBus(routeId) {
   document.getElementById("selectedBusDetail").innerHTML = `
     <div class="font-bold text-slate-900">${r.plate} — ${r.name}</div>
     <div class="mt-1">Segment: <b>${fromS} &rarr; ${toS}</b> | <b>${crowd.label}</b></div>
-    ${eff.detoured ? `<div class="mt-1 text-amber-700 font-semibold">Flood Detour Active (+${eff.extraMins} min): ${eff.stops.map(id => STOPS[id].name).join(" → ")}</div>` : ""}
+    ${eff.detoured ? `<div class="mt-1 text-amber-700 font-semibold">Detour Active (+${eff.extraMins}m): ${eff.stops.map(id => STOPS[id].name).join(" → ")}</div>` : ""}
   `;
 }
 function refreshAllViews() {
   renderAlerts();
-  renderDepotControls();
-  renderRoadBlockControls();
   updateWaitingUI();
   updateMapMarkers();
   findRoutes();
-}
-function saveState() {
-  localStorage.setItem("rl_routes", JSON.stringify(routes));
-  localStorage.setItem("rl_depots", JSON.stringify(depots));
-  localStorage.setItem("rl_blocked_edges", JSON.stringify(blockedEdges));
-  localStorage.setItem("rl_surge", JSON.stringify(demandSurge));
-  localStorage.setItem("rl_exam_urgency", JSON.stringify(examUrgency));
-  localStorage.setItem("rl_boarded", JSON.stringify(boardedBuses));
-  localStorage.setItem("rl_waiting", JSON.stringify(waitingUserStops));
-  localStorage.setItem("rl_alerts", JSON.stringify(alertsLog));
 }
