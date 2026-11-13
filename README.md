@@ -1,16 +1,9 @@
-# Routeless: The Last Mile — Dakshina Kannada AI Rural Student Bus Platform
+# Smart Rural Transit — Routeless: The Last Mile (Exam Day Crisis Edition)
 
-An AI-assisted rural student transportation platform built for **Dakshina Kannada** covering **52 educational institutions**, **45 rural/urban stops**, and **50 KSRTC-style corridors**.
+AI-assisted rural student bus navigation, live crowd telemetry, and **TransitShield Crisis Operations** platform for **Dakshina Kannada** (52 institutions, 45 stops, 50 routes).
 
-## Key Features
-- **First-Time Ticket Mode Setup**: Differentiates **Student Bus Pass** (1-tap "I Boarded" app check-in) from **Normal Paid Tickets** & **Women Free (Aadhaar/Shakti)** tickets (tracked via Conductor Smart ETM).
-- **Exact 3-Tier Crowd Logic**:
-  - `< 100%` Capacity: Green (Empty / Seats Available)
-  - `100% – 140%` Capacity: Amber (Moderate / Standing)
-  - `> 140%` Capacity: Red (Fully Crowded — Skip-Stop Risk Alert)
-- **All Direct + 1-Transfer Backup Routes**: Finds every direct route and suggests 1-transfer hub backups (BC Road, Puttur, Pumpwell, Moodabidri, Uppinangady) if primary buses are overcrowded or cancelled.
-- **Live Simulated GPS & Conductor ETM Simulator**: Interactive Leaflet map with 2-second GPS ticks and a built-in Conductor ETM drawer for live testing.
-- **Rural "Students Waiting" Beacon**: Aggregates stranded student counts at rural stops.
-
-## Prototype Disclosure
-Live KSRTC schedules, hardware GPS streams, and live ETM server webhooks are simulated in `data.js` / `app.js` for prototype demonstration. Production rollout requires connecting these feeds to official KSRTC/Government APIs.
+## Implemented Features
+- **Student Login (Passwordless):** Select **Student Bus Pass** (1-tap "I Boarded" check-in), **Women Free (Aadhaar/Shakti)** (ETM), or **Normal Ticket** (ETM), plus **Exam Priority (<2 hrs)** toggle.
+- **KSRTC Counter Portal (`admin` / `admin`):** Role-protected operations console for official bus breakdown reporting, nearest depot **Spare Bus Dispatch** (with automatic **Demand %** display when spares are exhausted), **Traffic Police Road Flood Closure & Fastest Alternative Detour Routing**, and **+40% Demand Surge**.
+- **Precautionary +15 Min Buffer:** Automatically adds 15 minutes during exams, breakdowns, or road closures and alerts students to start early.
+- **Exact Crowd Thresholds:** `<100%` Green (Empty), `100–140%` Amber (Moderate), `>140%` Red (Fully Crowded — Skip-Stop Risk).

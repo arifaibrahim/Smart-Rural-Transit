@@ -1,4 +1,4 @@
-// 45 Real Stops across Dakshina Kannada District (with accurate approximate coordinates)
+// 45 Real Stops across Dakshina Kannada District
 const STOPS = {
   state_bank: { id: "state_bank", name: "State Bank (Mangaluru Central)", lat: 12.8639, lng: 74.8358, waitBase: 14 },
   hampankatta: { id: "hampankatta", name: "Hampankatta", lat: 12.8691, lng: 74.8439, waitBase: 9 },
@@ -55,7 +55,7 @@ const INSTITUTIONS = [
   { id: "canara_eng", name: "Canara Engineering College, Benjanapadavu", stopId: "benjanapadavu" },
   { id: "sahyadri_eng", name: "Sahyadri College of Engg & Mgmt, Adyar", stopId: "adyar" },
   { id: "sjec_vamanjoor", name: "St Joseph Engineering College, Vamanjoor", stopId: "vamanjoor" },
-  { id: "alvas_eng", name: "Alva's Institute of Engg & Tech, Mijar/Moodabidri", stopId: "moodabidri" },
+  { id: "alvas_eng", name: "Alva's Institute of Engg & Tech, Moodabidri", stopId: "moodabidri" },
   { id: "alvas_degree", name: "Alva's College, Moodabidri", stopId: "moodabidri" },
   { id: "vcet_puttur", name: "Vivekananda College of Engg & Tech (VCET), Puttur", stopId: "puttur" },
   { id: "vc_degree_puttur", name: "Vivekananda Degree & PU College, Puttur", stopId: "puttur" },
@@ -103,7 +103,36 @@ const INSTITUTIONS = [
   { id: "stmarys_kinnigoli", name: "St Mary's First Grade College, Kinnigoli", stopId: "kinnigoli" }
 ];
 
-// 50 Dakshina Kannada Government / KSRTC Bus Routes (with realistic corridors, capacities & telemetry)
+// KSRTC Depots & Stations holding Spare Buses
+const INITIAL_DEPOTS = [
+  { id: "depot_mlr", name: "Mangaluru Central Depot", stopId: "state_bank", spares: ["KA-19-F-9001", "KA-19-F-9002"] },
+  { id: "depot_bcr", name: "B.C. Road Counter", stopId: "bc_road", spares: ["KA-19-F-9003"] },
+  { id: "depot_ptr", name: "Puttur KSRTC Depot", stopId: "puttur", spares: ["KA-21-F-9101"] },
+  { id: "depot_upp", name: "Uppinangady Counter", stopId: "uppinangady", spares: ["KA-21-F-9102"] },
+  { id: "depot_mdb", name: "Moodabidri Counter", stopId: "moodabidri", spares: ["KA-19-F-9004"] },
+  { id: "depot_sul", name: "Sullia Bus Depot", stopId: "sullia", spares: [] } // 0 spares initially to demonstrate "No Spare Available -> Demand %"
+];
+
+// Key Village-Connecting Road Segments for Traffic Police Blockage Controls
+const ROAD_SEGMENTS = [
+  { id: "bc_road__kalladka", a: "bc_road", b: "kalladka", label: "NH-75: B.C. Road ↔ Kalladka (Panemangalore Bridge)" },
+  { id: "kalladka__mani", a: "kalladka", b: "mani", label: "NH-75: Kalladka ↔ Mani Junction" },
+  { id: "uppinangady__kabaka", a: "uppinangady", b: "kabaka", label: "Uppinangady ↔ Kabaka (Nethravathi Crossing)" },
+  { id: "kaikamba__moodabidri", a: "kaikamba", b: "moodabidri", label: "NH-169: Gurupura Kaikamba ↔ Moodabidri" },
+  { id: "bellare__puttur", a: "bellare", b: "puttur", label: "Bellare ↔ Puttur State Highway" },
+  { id: "belthangady__madanthyar", a: "belthangady", b: "madanthyar", label: "Belthangady ↔ Madanthyar Highway" }
+];
+
+// Extra Rural Connecting Roads so Detour Pathfinder always finds realistic village bypasses
+const EXTRA_ROAD_LINKS = [
+  ["kalladka", "vitla", 12], ["vitla", "mudipu", 16], ["mudipu", "bc_road", 14],
+  ["bc_road", "punjalkatte", 15], ["punjalkatte", "madanthyar", 10], ["madanthyar", "uppinangady", 16],
+  ["uppinangady", "kadaba", 18], ["kadaba", "bellare", 15], ["bellare", "sullia", 14],
+  ["vamanjoor", "bajpe", 12], ["bajpe", "aikala", 13], ["aikala", "moodabidri", 16],
+  ["benjanapadavu", "kaikamba", 11], ["adyar", "mudipu", 14], ["deralakatte", "pumpwell", 14]
+];
+
+// 50 Dakshina Kannada Government / KSRTC Bus Routes
 const INITIAL_ROUTES = [
   { id: "R01", plate: "KA-19-F-3101", name: "Puttur → BC Road → State Bank", stops: ["puttur", "kabaka", "mani", "kalladka", "bc_road", "valachil", "adyar", "pumpwell", "hampankatta", "state_bank"], dep: "07:10", arr: "08:50", cap: 45, etmNormal: 24, etmAadhaar: 12, passCount: 6, cancelled: false },
   { id: "R02", plate: "KA-19-F-3102", name: "Sullia → Puttur → Mangaluru Express", stops: ["sullia", "bellare", "puttur", "kalladka", "bc_road", "pumpwell", "kankanady", "hampankatta", "state_bank"], dep: "06:45", arr: "09:05", cap: 50, etmNormal: 38, etmAadhaar: 22, passCount: 14, cancelled: false },
@@ -119,7 +148,7 @@ const INITIAL_ROUTES = [
   { id: "R12", plate: "KA-21-F-4102", name: "Vittla → Kabaka → Puttur", stops: ["kanyana", "vitla", "kabaka", "puttur"], dep: "07:45", arr: "08:45", cap: 40, etmNormal: 15, etmAadhaar: 8, passCount: 5, cancelled: false },
   { id: "R13", plate: "KA-21-F-4103", name: "Subramanya → Kadaba → Uppinangady → Puttur", stops: ["subramanya", "kadaba", "uppinangady", "kabaka", "puttur"], dep: "06:50", arr: "08:45", cap: 45, etmNormal: 27, etmAadhaar: 17, passCount: 9, cancelled: false },
   { id: "R14", plate: "KA-21-F-4104", name: "Nelyadi → Uppinangady → Puttur", stops: ["nelyadi", "uppinangady", "kabaka", "puttur"], dep: "07:35", arr: "08:50", cap: 42, etmNormal: 16, etmAadhaar: 10, passCount: 6, cancelled: false },
-  { id: "R15", plate: "KA-21-F-4105", name: "Bellare → Sullia → Puttur", stops: ["sullia", "bellare", "puttur"], dep: "07:30", arr: "08:50", cap: 44, etmNormal: 21, etmAadhaar: 12, passCount: 8, cancelled: false },
+  { id: "R15", plate: "KA-21-F-4105", name: "Sullia → Bellare → Puttur", stops: ["sullia", "bellare", "puttur"], dep: "07:30", arr: "08:50", cap: 44, etmNormal: 21, etmAadhaar: 12, passCount: 8, cancelled: false },
   { id: "R16", plate: "KA-19-F-3116", name: "Venoor → Moodabidri → Kinnigoli → Mulki", stops: ["venoor", "moodabidri", "aikala", "kinnigoli", "mulki"], dep: "07:15", arr: "08:50", cap: 40, etmNormal: 13, etmAadhaar: 9, passCount: 7, cancelled: false },
   { id: "R17", plate: "KA-19-F-3117", name: "Belthangady → Venoor → Moodabidri", stops: ["ujire", "belthangady", "venoor", "moodabidri"], dep: "07:20", arr: "08:45", cap: 42, etmNormal: 20, etmAadhaar: 11, passCount: 9, cancelled: false },
   { id: "R18", plate: "KA-19-F-3118", name: "Puttur → Uppinangady → Belthangady → Ujire", stops: ["puttur", "kabaka", "uppinangady", "madanthyar", "belthangady", "ujire"], dep: "07:15", arr: "08:55", cap: 44, etmNormal: 25, etmAadhaar: 14, passCount: 8, cancelled: false },
@@ -150,9 +179,9 @@ const INITIAL_ROUTES = [
   { id: "R43", plate: "KA-19-F-3143", name: "Talapady → Thokkottu → Adyar → Valachil", stops: ["talapady", "ullal", "thokkottu", "pumpwell", "adyar", "valachil"], dep: "07:55", arr: "09:00", cap: 44, etmNormal: 20, etmAadhaar: 12, passCount: 7, cancelled: false },
   { id: "R44", plate: "KA-21-F-4121", name: "Subramanya → Kadaba → Bellare → Sullia", stops: ["subramanya", "kadaba", "bellare", "sullia"], dep: "07:15", arr: "08:55", cap: 44, etmNormal: 21, etmAadhaar: 14, passCount: 6, cancelled: false },
   { id: "R45", plate: "KA-21-F-4122", name: "Nelyadi → Uppinangady → BC Road → State Bank", stops: ["nelyadi", "uppinangady", "kalladka", "bc_road", "pumpwell", "state_bank"], dep: "06:55", arr: "09:05", cap: 48, etmNormal: 33, etmAadhaar: 22, passCount: 15, cancelled: false },
-  { id: "R46", plate: "KA-19-F-3146", name: "Morning Shuttle 2: Puttur → Kalladka → BC Road → State Bank", stops: ["puttur", "kabaka", "kalladka", "bc_road", "adyar", "pumpwell", "state_bank"], dep: "07:55", arr: "09:20", cap: 45, etmNormal: 16, etmAadhaar: 10, passCount: 4, cancelled: false },
-  { id: "R47", plate: "KA-19-F-3147", name: "Morning Shuttle 2: Moodabidri → Vamanjoor → Nanthoor → Hampankatta", stops: ["moodabidri", "kaikamba", "vamanjoor", "nanthoor", "hampankatta"], dep: "08:10", arr: "09:15", cap: 45, etmNormal: 19, etmAadhaar: 11, passCount: 5, cancelled: false },
-  { id: "R48", plate: "KA-19-F-3148", name: "Morning Shuttle 2: Mulki → Surathkal → Kottara → State Bank", stops: ["mulki", "nitk", "surathkal", "kottara", "hampankatta", "state_bank"], dep: "08:05", arr: "09:10", cap: 45, etmNormal: 21, etmAadhaar: 12, passCount: 7, cancelled: false },
+  { id: "R46", plate: "KA-19-F-3146", name: "Shuttle 2: Puttur → Kalladka → BC Road → State Bank", stops: ["puttur", "kabaka", "kalladka", "bc_road", "adyar", "pumpwell", "state_bank"], dep: "07:55", arr: "09:20", cap: 45, etmNormal: 16, etmAadhaar: 10, passCount: 4, cancelled: false },
+  { id: "R47", plate: "KA-19-F-3147", name: "Shuttle 2: Moodabidri → Vamanjoor → Nanthoor → Hampankatta", stops: ["moodabidri", "kaikamba", "vamanjoor", "nanthoor", "hampankatta"], dep: "08:10", arr: "09:15", cap: 45, etmNormal: 19, etmAadhaar: 11, passCount: 5, cancelled: false },
+  { id: "R48", plate: "KA-19-F-3148", name: "Shuttle 2: Mulki → Surathkal → Kottara → State Bank", stops: ["mulki", "nitk", "surathkal", "kottara", "hampankatta", "state_bank"], dep: "08:05", arr: "09:10", cap: 45, etmNormal: 21, etmAadhaar: 12, passCount: 7, cancelled: false },
   { id: "R49", plate: "KA-19-F-3149", name: "Evening Return: State Bank → BC Road → Puttur → Sullia", stops: ["state_bank", "hampankatta", "pumpwell", "adyar", "bc_road", "kalladka", "puttur", "sullia"], dep: "16:30", arr: "18:45", cap: 50, etmNormal: 29, etmAadhaar: 18, passCount: 10, cancelled: false },
-  { id: "R50", plate: "KA-19-F-3150", name: "Evening Return: State Bank → Vamanjoor → Moodabidri → Belthangady", stops: ["state_bank", "hampankatta", "nanthoor", "vamanjoor", "moodabidri", "venoor", "belthangady", "ujire"], dep: "16:45", arr: "18:50", cap: 48, etmNormal: 25, etmAadhaar: 16, passCount: 8, cancelled: false }
+  { id: "R50", plate: "KA-19-F-3150", name: "Evening Return: State Bank → Vamanjoor → Moodabidri → Ujire", stops: ["state_bank", "hampankatta", "nanthoor", "vamanjoor", "moodabidri", "venoor", "belthangady", "ujire"], dep: "16:45", arr: "18:50", cap: 48, etmNormal: 25, etmAadhaar: 16, passCount: 8, cancelled: false }
 ];

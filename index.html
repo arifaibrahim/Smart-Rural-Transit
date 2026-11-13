@@ -1,166 +1,409 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="scroll-smooth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Routeless: The Last Mile | Dakshina Kannada Rural Student Transit</title>
+  <title>Smart Rural Transit | Routeless: The Last Mile — Dakshina Kannada</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
-    #map { height: 390px; width: 100%; border-radius: 0.75rem; z-index: 1; }
+    #map { height: 420px; width: 100%; border-radius: 1rem; z-index: 1; }
     .pulse-dot { animation: pulse 1.8s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .hero-bg {
+      background:
+        radial-gradient(circle at 75% 35%, rgba(251, 146, 60, 0.38), transparent 45%),
+        radial-gradient(circle at 20% 80%, rgba(14, 165, 233, 0.35), transparent 50%),
+        linear-gradient(120deg, #0b132b 0%, #1c2541 48%, #2b2d42 100%);
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.62);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+    }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans">
+<body class="bg-slate-50 text-slate-800 font-sans antialiased">
 
-  <!-- Onboarding / Ticket Type Modal -->
-  <div id="ticketModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
-      <div class="flex items-center justify-between mb-3">
-        <span class="px-2.5 py-1 text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full">FIRST-TIME SETUP</span>
-        <span class="text-xs text-slate-400">Dakshina Kannada Transit</span>
+  <!-- 1. PASSWORDLESS STUDENT LOGIN / TICKET TYPE & EXAM MODAL -->
+  <div id="studentModal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="px-3 py-1 text-xs font-bold bg-cyan-100 text-cyan-800 rounded-full">STUDENT PORTAL (NO PASSWORD)</span>
+        <button onclick="closeModal('studentModal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">&times;</button>
       </div>
-      <h2 class="text-xl font-bold text-slate-900 mb-1">How do you travel on Govt Buses?</h2>
-      <p class="text-sm text-slate-600 mb-4">
-        Conductor ETM machines track Normal & Women Free (Aadhaar) tickets automatically, while Bus Pass holders check in via the app for accurate crowd counts.
+      <h2 class="text-xl font-extrabold text-slate-900">Select Your Travel Mode</h2>
+      <p class="text-xs text-slate-600 mt-1 mb-4">
+        Normal & Women Free (Aadhaar/Shakti) tickets are tracked live by the Conductor's ETM. Bus Pass students check in with 1 tap when boarding.
       </p>
-      <div class="space-y-3">
-        <button onclick="setTicketMode('pass')" class="w-full text-left p-4 rounded-xl border-2 border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/50 transition">
-          <div class="font-bold text-slate-900">1. Student Bus Pass</div>
-          <div class="text-xs text-slate-600 mt-0.5">Not counted in ETM. You will get a 1-tap <b>"I Boarded"</b> button to update live seat count.</div>
+
+      <!-- Exam Priority Toggle -->
+      <label class="flex items-start gap-3 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 mb-4 cursor-pointer">
+        <input type="checkbox" id="modalExamCheck" class="mt-1 w-4 h-4 accent-amber-600 rounded" />
+        <div>
+          <div class="text-sm font-bold text-amber-900">Exam / Urgent Travel within 2 Hours</div>
+          <div class="text-xs text-amber-800">Automatically adds a <b>+15 min precautionary safety buffer</b>, prioritizes fast backup routes, and flags your stop for spare bus dispatch.</div>
+        </div>
+      </label>
+
+      <div class="space-y-2.5">
+        <button onclick="saveStudentMode('pass')" class="w-full text-left p-3.5 rounded-2xl border-2 border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/60 transition">
+          <div class="font-bold text-sm text-slate-900">Student Bus Pass</div>
+          <div class="text-xs text-slate-600">Not counted in ETM — enables your 1-tap <b>"I Boarded This Bus"</b> check-in button.</div>
         </button>
-        <button onclick="setTicketMode('aadhaar')" class="w-full text-left p-4 rounded-xl border-2 border-slate-200 hover:border-emerald-600 hover:bg-emerald-50/50 transition">
-          <div class="font-bold text-slate-900">2. Women Free Ticket (Aadhaar / Shakti)</div>
-          <div class="text-xs text-slate-600 mt-0.5">Issued via Conductor ETM (counts under Normal ETM tickets unless you hold a separate Student Pass).</div>
+        <button onclick="saveStudentMode('aadhaar')" class="w-full text-left p-3.5 rounded-2xl border-2 border-slate-200 hover:border-emerald-600 hover:bg-emerald-50/60 transition">
+          <div class="font-bold text-sm text-slate-900">Women Free Ticket (Aadhaar / Shakti)</div>
+          <div class="text-xs text-slate-600">Counted automatically under Normal ETM tickets (unless you carry a separate Student Pass).</div>
         </button>
-        <button onclick="setTicketMode('normal')" class="w-full text-left p-4 rounded-xl border-2 border-slate-200 hover:border-amber-600 hover:bg-amber-50/50 transition">
-          <div class="font-bold text-slate-900">3. Normal Paid Ticket (UPI / Cash / Card)</div>
-          <div class="text-xs text-slate-600 mt-0.5">Tracked live automatically when the conductor prints your ETM ticket.</div>
+        <button onclick="saveStudentMode('normal')" class="w-full text-left p-3.5 rounded-2xl border-2 border-slate-200 hover:border-amber-500 hover:bg-amber-50/60 transition">
+          <div class="font-bold text-sm text-slate-900">Normal Paid Ticket (UPI / Cash / Card)</div>
+          <div class="text-xs text-slate-600">Counted automatically by Conductor Smart ETM machine.</div>
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Header -->
-  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-30">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center font-black text-lg shadow">RL</div>
-        <div>
-          <h1 class="font-bold text-lg leading-tight">ROUTELESS: THE LAST MILE</h1>
-          <p class="text-xs text-slate-300">Dakshina Kannada AI Rural Student Bus & Backup Router</p>
-        </div>
+  <!-- 2. KSRTC OFFICIAL COUNTER LOGIN MODAL (admin / admin) -->
+  <div id="ksrtcLoginModal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="px-3 py-1 text-xs font-bold bg-purple-100 text-purple-800 rounded-full">AUTHORIZED KSRTC COUNTER</span>
+        <button onclick="closeModal('ksrtcLoginModal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">&times;</button>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="flex items-center gap-1.5 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-full">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span> Simulated GPS + ETM Live
-        </span>
-        <button onclick="openTicketModal()" id="currentModeBadge" class="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-1.5 rounded-lg font-medium">
-          Mode: Loading...
+      <h2 class="text-xl font-extrabold text-slate-900">KSRTC Operations & Conductor Login</h2>
+      <p class="text-xs text-slate-600 mt-1 mb-4">Prevents unauthorized breakdown or road-closure reports. Demo credentials: <b>admin</b> / <b>admin</b></p>
+      <form onsubmit="handleKsrtcLogin(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Official Username</label>
+          <input id="ksrtcUser" type="text" required placeholder="admin" class="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Password</label>
+          <input id="ksrtcPass" type="password" required placeholder="admin" class="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
+        </div>
+        <div id="ksrtcLoginError" class="hidden text-xs font-semibold text-rose-600 bg-rose-50 px-3 py-2 rounded-lg">Invalid username or password. Use admin / admin.</div>
+        <button type="submit" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-95 text-white font-bold py-2.5 rounded-xl text-sm shadow">
+          Unlock KSRTC Operations Portal
         </button>
-        <button onclick="toggleSimulator()" class="text-xs bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg transition">
-          Conductor ETM Simulator
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. ALERTS & CRISIS FEED MODAL -->
+  <div id="alertsModal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+        <div>
+          <h2 class="text-lg font-extrabold text-slate-900">TransitShield Live Emergency Alerts</h2>
+          <p class="text-xs text-slate-500">Real-time breakdowns, spare bus dispatches, flooded road detours & exam advisories</p>
+        </div>
+        <button onclick="closeModal('alertsModal')" class="text-slate-400 hover:text-slate-800 text-2xl font-bold leading-none">&times;</button>
+      </div>
+      <div id="alertsFeedList" class="mt-4 space-y-2.5 overflow-y-auto pr-1 flex-1"></div>
+    </div>
+  </div>
+
+  <!-- 4. ABOUT & DISCLOSURE MODAL -->
+  <div id="aboutModal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-extrabold text-slate-900">About Smart Rural Transit & Prototype Scope</h2>
+        <button onclick="closeModal('aboutModal')" class="text-slate-400 hover:text-slate-800 text-2xl font-bold leading-none">&times;</button>
+      </div>
+      <div class="text-xs text-slate-600 space-y-2.5 leading-relaxed">
+        <p><b>Routeless: The Last Mile</b> empowers rural Dakshina Kannada students across <b>52 colleges/schools</b>, <b>45 rural/urban stops</b>, and <b>50 corridors</b> to overcome overcrowding, skip-stop risks, breakdowns, and monsoon road closures.</p>
+        <p class="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-900">
+          <b>Transparency & Verification Disclosure:</b> Live GPS coordinates, Conductor ETM ticket streams, and depot spare-bus links are simulated in-browser for rapid hackathon validation. Official KSRTC schedule & hardware API verification is required before live district deployment.
+        </p>
+        <p><b>Crowd Thresholds:</b> Green (&lt;100% Empty) | Amber (100–140% Moderate) | Red (&gt;140% Fully Crowded — Skip-Stop Risk).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP NAVIGATION BAR (Matches Reference Mockup) -->
+  <header class="bg-[#0b132b]/95 backdrop-blur-md text-white sticky top-0 z-40 border-b border-white/10">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <a href="#homeSection" class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.3" viewBox="0 0 24 24"><path d="M4 16V6a2 2 0 012-2h12a2 2 0 012 2v10M4 16h16M4 16l-1 3h2l1-3m14 0l1 3h-2l-1-3M7 12h.01M17 12h.01M6 8h12"/></svg>
+        </div>
+        <div>
+          <div class="font-extrabold text-base leading-tight">Smart Rural <span class="text-cyan-400">Transit</span></div>
+          <div class="text-[11px] text-slate-300">DK Student Mobility Platform</div>
+        </div>
+      </a>
+
+      <nav class="hidden md:flex items-center gap-1.5 text-xs font-semibold">
+        <a href="#homeSection" class="px-3.5 py-2 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">Home</a>
+        <a href="#plannerSection" class="px-3.5 py-2 rounded-xl text-slate-200 hover:bg-white/10 transition">Find Bus</a>
+        <a href="#mapSection" class="px-3.5 py-2 rounded-xl text-slate-200 hover:bg-white/10 transition">Live Tracking</a>
+        <button onclick="openModal('alertsModal')" class="relative px-3.5 py-2 rounded-xl text-slate-200 hover:bg-white/10 transition">
+          Alerts <span id="navAlertBadge" class="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-rose-500 text-white rounded-full">0</span>
+        </button>
+        <button onclick="openModal('aboutModal')" class="px-3.5 py-2 rounded-xl text-slate-200 hover:bg-white/10 transition">About</button>
+      </nav>
+
+      <div class="flex items-center gap-2">
+        <button onclick="handleKsrtcPortalButton()" id="ksrtcHeaderBtn" class="text-xs font-bold bg-gradient-to-r from-violet-600 to-purple-600 hover:opacity-95 text-white px-3.5 py-2 rounded-xl shadow transition">
+          KSRTC Login
+        </button>
+        <button onclick="openModal('studentModal')" id="studentHeaderBtn" class="text-xs font-bold bg-white hover:bg-slate-100 text-slate-900 px-3.5 py-2 rounded-xl shadow transition">
+          Student Login
         </button>
       </div>
     </div>
   </header>
 
-  <!-- Prototype Transparency Banner -->
-  <div class="bg-indigo-50 border-b border-indigo-200 text-indigo-900 text-xs py-2 px-4">
-    <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
-      <span>
-        <b>Prototype Notice:</b> Built with <b>52 real Dakshina Kannada colleges</b> & <b>50 routes</b>. Live GPS & Conductor ETM feeds are simulated for hackathon demo; official KSRTC operator verification is required for production.
-      </span>
-      <span class="font-semibold">Crowd Rules: &lt;100% Empty (Green) | 100–140% Moderate (Amber) | &gt;140% Overcrowded (Red)</span>
-    </div>
-  </div>
+  <!-- HERO SECTION (Matches Reference Mockup) -->
+  <section id="homeSection" class="hero-bg text-white relative overflow-hidden pb-14 pt-10">
+    <!-- Subtle Coastal Bus & Lighthouse SVG Silhouette Backdrop -->
+    <svg class="absolute right-0 bottom-0 h-full w-full md:w-2/3 opacity-20 pointer-events-none" viewBox="0 0 800 400" preserveAspectRatio="xMidYMid slice">
+      <path d="M0 330 Q220 290 460 320 T800 300 L800 400 L0 400 Z" fill="#0ea5e9"/>
+      <rect x="650" y="90" width="22" height="130" rx="4" fill="#f8fafc"/>
+      <polygon points="646,90 676,90 661,65" fill="#ef4444"/>
+      <rect x="330" y="190" width="210" height="95" rx="16" fill="#e11d48"/>
+      <rect x="345" y="205" width="180" height="36" rx="6" fill="#bae6fd"/>
+      <circle cx="375" cy="290" r="18" fill="#0f172a"/><circle cx="495" cy="290" r="18" fill="#0f172a"/>
+    </svg>
 
-  <!-- Main Container -->
-  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-
-    <!-- Conductor ETM & Disruption Simulator Drawer -->
-    <section id="simulatorPanel" class="hidden bg-slate-900 text-white rounded-2xl p-5 shadow-xl border border-amber-500/40">
-      <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
-        <div>
-          <h3 class="font-bold text-amber-400 text-base">Conductor Smart ETM & Disruption Simulator (Judge Demo Control)</h3>
-          <p class="text-xs text-slate-300">Simulate live ticket punches (Normal / Women Aadhaar Free) or route breakdowns to watch student recommendations update instantly.</p>
+    <div class="max-w-7xl mx-auto px-4 relative z-10">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+        <!-- Hero Left -->
+        <div class="lg:col-span-8 space-y-5">
+          <h1 class="text-4xl sm:text-5xl font-black tracking-tight leading-tight">
+            Smarter, Safer &amp;<br />On-Time <span class="text-cyan-400">Travel</span>
+          </h1>
+          <p class="text-slate-200 text-sm sm:text-base max-w-xl leading-relaxed">
+            A digital travel companion for rural students of Dakshina Kannada — plan, track, and navigate your daily commute and Exam Day emergencies with confidence.
+          </p>
+          <div class="flex flex-wrap gap-3 pt-1">
+            <a href="#plannerSection" class="bg-white text-slate-900 hover:bg-slate-100 font-bold text-sm px-5 py-3 rounded-xl shadow-lg transition inline-flex items-center gap-2">
+              Plan My Journey <span>&rarr;</span>
+            </a>
+            <a href="#mapSection" class="glass-card hover:bg-white/15 text-white font-bold text-sm px-5 py-3 rounded-xl transition inline-flex items-center gap-2">
+              Live Bus Tracking
+            </a>
+          </div>
+          <div class="flex flex-wrap items-center gap-5 pt-2 text-xs text-slate-300 font-medium">
+            <span>&#127891; Student &amp; Exam Focused</span>
+            <span>&#9889; Real-Time ETM &amp; Pass Sync</span>
+            <span>&#128737; TransitShield Crisis Rerouting</span>
+          </div>
         </div>
-        <button onclick="resetTelemetry()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg">Reset All Data</button>
+
+        <!-- Hero Right Floating Weather & Live Status Widget -->
+        <div class="lg:col-span-4 flex lg:justify-end">
+          <div class="glass-card rounded-3xl p-5 w-full max-w-xs space-y-3 shadow-2xl">
+            <div class="text-xs text-slate-300 font-medium">&#128205; Dakshina Kannada</div>
+            <div class="flex items-center gap-3">
+              <span class="text-3xl">&#9925;</span>
+              <div>
+                <div class="text-2xl font-extrabold">28&deg;C</div>
+                <div class="text-xs text-slate-300">Monsoon Alert Watch</div>
+              </div>
+            </div>
+            <button onclick="openModal('alertsModal')" class="w-full bg-rose-500/85 hover:bg-rose-500 text-white text-xs font-bold px-3.5 py-2.5 rounded-xl flex items-center justify-between transition">
+              <span id="heroAlertText">&#9888; 0 Active Alerts</span>
+              <span>&rarr;</span>
+            </button>
+            <a href="#mapSection" class="w-full bg-emerald-500/85 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2.5 rounded-xl flex items-center justify-between transition">
+              <span id="heroLiveBusText">&#128737; 50 Buses Live</span>
+              <span>&rarr;</span>
+            </a>
+          </div>
+        </div>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-        <div class="md:col-span-2">
-          <label class="block text-xs text-slate-400 mb-1">Select Active Bus (Number Plate & Route)</label>
-          <select id="simBusSelect" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></select>
+
+      <!-- 4 Pastel Quick Action Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
+        <a href="#plannerSection" class="bg-sky-100 hover:bg-sky-200/80 text-slate-900 rounded-2xl p-4 shadow-md transition flex items-center justify-between gap-3">
+          <div>
+            <div class="font-extrabold text-sm text-sky-950">Find Buses</div>
+            <div class="text-xs text-sky-800 mt-0.5">Best direct &amp; backup routes to your college</div>
+          </div>
+          <span class="text-sky-700 font-bold text-lg">&rarr;</span>
+        </a>
+        <a href="#mapSection" class="bg-emerald-100 hover:bg-emerald-200/80 text-slate-900 rounded-2xl p-4 shadow-md transition flex items-center justify-between gap-3">
+          <div>
+            <div class="font-extrabold text-sm text-emerald-950">Live Tracking</div>
+            <div class="text-xs text-emerald-800 mt-0.5">Track buses &amp; flood detours with GPS</div>
+          </div>
+          <span class="text-emerald-700 font-bold text-lg">&rarr;</span>
+        </a>
+        <a href="#resultsSection" class="bg-amber-100 hover:bg-amber-200/80 text-slate-900 rounded-2xl p-4 shadow-md transition flex items-center justify-between gap-3">
+          <div>
+            <div class="font-extrabold text-sm text-amber-950">Seat Availability</div>
+            <div class="text-xs text-amber-800 mt-0.5">Empty / Moderate / Crowded &amp; Demand %</div>
+          </div>
+          <span class="text-amber-700 font-bold text-lg">&rarr;</span>
+        </a>
+        <button onclick="openModal('alertsModal')" class="text-left bg-rose-100 hover:bg-rose-200/80 text-slate-900 rounded-2xl p-4 shadow-md transition flex items-center justify-between gap-3">
+          <div>
+            <div class="font-extrabold text-sm text-rose-950">Emergency Updates</div>
+            <div class="text-xs text-rose-800 mt-0.5">Breakdown, Road Closure &amp; Demand Surge</div>
+          </div>
+          <span class="text-rose-700 font-bold text-lg">&rarr;</span>
+        </button>
+      </div>
+
+      <!-- TransitShield Bar -->
+      <div class="mt-4 bg-gradient-to-r from-[#2e1065] via-[#4c1d95] to-[#701a75] rounded-2xl p-4 shadow-lg border border-white/15 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">&#128680;</span>
+          <div>
+            <div class="font-extrabold text-sm text-white">TransitShield <span id="crisisStatusPill" class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">NORMAL OPS</span></div>
+            <div class="text-xs text-purple-200">Emergency Response &amp; Exam Day Operations Centre</div>
+          </div>
         </div>
-        <div class="flex flex-wrap gap-2 md:col-span-2">
-          <button onclick="simAddTicket('normal', 1)" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-lg text-xs font-bold">+1 Normal ETM</button>
-          <button onclick="simAddTicket('aadhaar', 1)" class="bg-teal-600 hover:bg-teal-500 px-3 py-2 rounded-lg text-xs font-bold">+1 Women Free (Aadhaar)</button>
-          <button onclick="simAddTicket('normal', 8)" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded-lg text-xs font-bold">+8 Rush Crowd</button>
-          <button onclick="simToggleCancel()" class="bg-rose-600 hover:bg-rose-500 px-3 py-2 rounded-lg text-xs font-bold">Toggle Cancel / Breakdown</button>
+        <div class="flex flex-wrap items-center gap-4 text-xs text-purple-100 font-semibold">
+          <span>&#9881; Bus Breakdown</span>
+          <span>&#128679; Road Blockage</span>
+          <span>&#128101; Demand Surge</span>
+          <span>&#9201; Exam Time Pressure</span>
+        </div>
+        <button onclick="openModal('alertsModal')" class="bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold px-4 py-2 rounded-xl shadow transition">
+          View Live Updates &rarr;
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN WORKSPACE -->
+  <main class="max-w-7xl mx-auto px-4 py-7 space-y-6">
+
+    <!-- AUTHENTICATED KSRTC COUNTER OPERATIONS PORTAL (Only visible when logged in as admin/admin) -->
+    <section id="ksrtcPortalSection" class="hidden bg-slate-900 text-white rounded-3xl p-6 shadow-2xl border-2 border-purple-500/50 space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 pb-4">
+        <div>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-purple-300">Authenticated KSRTC Counter &amp; Traffic Control</span>
+          <h2 class="text-xl font-extrabold">TransitShield Command Centre</h2>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="triggerExamDayCrisis()" class="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-4 py-2 rounded-xl shadow">
+            Simulate Exam Day Crisis (2 Breakdowns + 40% Surge + Road Flood)
+          </button>
+          <button onclick="toggleDemandSurge()" id="surgeToggleBtn" class="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-4 py-2 rounded-xl">
+            +40% Demand Surge: OFF
+          </button>
+          <button onclick="resetTelemetry()" class="bg-slate-700 hover:bg-slate-600 text-xs font-bold px-3.5 py-2 rounded-xl">Reset All</button>
+          <button onclick="logoutKsrtc()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold px-3.5 py-2 rounded-xl">Logout</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <!-- Panel A: Breakdown & Conductor ETM -->
+        <div class="bg-slate-800/80 rounded-2xl p-4 border border-slate-700 space-y-3">
+          <h3 class="font-bold text-sm text-cyan-300">1. Bus Breakdown &amp; Live ETM Counter</h3>
+          <select id="simBusSelect" class="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-xs text-white"></select>
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="simAddTicket('normal', 1)" class="bg-emerald-600 hover:bg-emerald-500 py-2 rounded-xl text-xs font-bold">+1 Normal ETM</button>
+            <button onclick="simAddTicket('aadhaar', 1)" class="bg-teal-600 hover:bg-teal-500 py-2 rounded-xl text-xs font-bold">+1 Women Free (Aadhaar)</button>
+            <button onclick="simAddTicket('normal', 8)" class="bg-amber-600 hover:bg-amber-500 py-2 rounded-xl text-xs font-bold">+8 Rush Crowd</button>
+            <button onclick="reportBusBreakdown()" class="bg-rose-600 hover:bg-rose-500 py-2 rounded-xl text-xs font-bold">Report / Clear Breakdown</button>
+          </div>
+          <p class="text-[11px] text-slate-400">Reporting a breakdown automatically alerts the nearest KSRTC station with spare buses.</p>
+        </div>
+
+        <!-- Panel B: Nearest Station Spare Bus Dispatch Queue -->
+        <div class="bg-slate-800/80 rounded-2xl p-4 border border-slate-700 space-y-2.5">
+          <h3 class="font-bold text-sm text-amber-300">2. Spare Bus Dispatch Notifications</h3>
+          <div id="depotDispatchQueue" class="space-y-2 max-h-44 overflow-y-auto text-xs"></div>
+          <div id="depotInventorySummary" class="text-[11px] text-slate-300 pt-2 border-t border-slate-700"></div>
+        </div>
+
+        <!-- Panel C: Traffic Police Road Closure / Flooding -->
+        <div class="bg-slate-800/80 rounded-2xl p-4 border border-slate-700 space-y-3">
+          <h3 class="font-bold text-sm text-rose-300">3. Traffic Police Road Blockage / Flooding</h3>
+          <select id="roadBlockSelect" class="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-xs text-white"></select>
+          <button onclick="toggleRoadBlock()" class="w-full bg-rose-600 hover:bg-rose-500 py-2 rounded-xl text-xs font-bold">
+            Toggle Road Flood / Blockage &amp; Reroute Conductors
+          </button>
+          <div id="activeBlockedList" class="text-[11px] text-rose-200 space-y-1"></div>
         </div>
       </div>
     </section>
 
-    <!-- Search & Planner Card -->
-    <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+    <!-- PRECAUTIONARY CRISIS / EXAM BANNER (Shown automatically when active) -->
+    <section id="precautionBanner" class="hidden bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-start gap-3">
+        <span class="text-2xl">&#9888;&#65039;</span>
+        <div>
+          <div class="font-extrabold text-sm text-rose-900" id="precautionTitle">Early Departure &amp; Crisis Alert</div>
+          <div class="text-xs text-rose-800 mt-0.5" id="precautionDesc"></div>
+        </div>
+      </div>
+      <span class="px-3 py-1.5 bg-rose-600 text-white text-xs font-extrabold rounded-xl shadow-sm">+15 Min Precautionary Buffer Active</span>
+    </section>
+
+    <!-- JOURNEY PLANNER -->
+    <section id="plannerSection" class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 sm:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div>
+          <h2 class="text-lg font-extrabold text-slate-900">Find Buses &amp; Crisis-Adaptive Backup Routes</h2>
+          <p class="text-xs text-slate-500">All 52 Dakshina Kannada educational institutions &amp; 50 KSRTC routes</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 cursor-pointer">
+            <input type="checkbox" id="examUrgencyCheck" onchange="toggleExamUrgency()" class="accent-amber-600 w-4 h-4" />
+            Exam / Urgent (&lt;2 hrs) — Add 15m Buffer
+          </label>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
         <div class="md:col-span-4">
-          <label class="block text-xs font-bold uppercase text-slate-500 mb-1">1. Your Village / Pickup Stop</label>
-          <select id="originSelect" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500"></select>
+          <label class="block text-xs font-bold uppercase text-slate-500 mb-1">1. Pickup Village / Stop</label>
+          <select id="originSelect" class="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500"></select>
         </div>
         <div class="md:col-span-4">
-          <label class="block text-xs font-bold uppercase text-slate-500 mb-1">2. Destination School / College (52 Institutions)</label>
-          <select id="collegeSelect" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500"></select>
+          <label class="block text-xs font-bold uppercase text-slate-500 mb-1">2. Destination College / School (52)</label>
+          <select id="collegeSelect" class="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500"></select>
         </div>
         <div class="md:col-span-2">
           <label class="block text-xs font-bold uppercase text-slate-500 mb-1">3. Reach By</label>
-          <input id="targetTimeInput" type="time" value="09:15" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500" />
+          <input id="targetTimeInput" type="time" value="09:15" onchange="findRoutes()" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm bg-slate-50" />
         </div>
-        <div class="md:col-span-2 flex gap-2">
+        <div class="md:col-span-2">
           <button onclick="findRoutes()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm shadow transition">
-            Find Buses
+            Search Routes
           </button>
         </div>
       </div>
 
-      <!-- Quick Rural Presets + Waiting Beacon -->
-      <div class="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+      <!-- Quick Demos + Waiting Beacon -->
+      <div class="mt-4 pt-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2 text-xs">
-          <span class="text-slate-500 font-semibold">Quick Demos:</span>
-          <button onclick="applyPreset('kalladka', 'st_aloysius', '09:15')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Kalladka → St Aloysius</button>
-          <button onclick="applyPreset('uppinangady', 'vcet_puttur', '09:15')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Uppinangady → VCET Puttur</button>
-          <button onclick="applyPreset('venoor', 'alvas_eng', '09:30')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Venoor → Alva's Moodabidri</button>
-          <button onclick="applyPreset('bellare', 'kvg_sullia', '09:30')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Bellare → KVG Sullia</button>
+          <span class="font-bold text-slate-500">Quick Demos:</span>
+          <button onclick="applyPreset('kalladka', 'st_aloysius', '09:15')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Kalladka &rarr; St Aloysius</button>
+          <button onclick="applyPreset('uppinangady', 'vcet_puttur', '09:15')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Uppinangady &rarr; VCET Puttur</button>
+          <button onclick="applyPreset('venoor', 'alvas_eng', '09:30')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Venoor &rarr; Alva's</button>
+          <button onclick="applyPreset('bellare', 'kvg_sullia', '09:30')" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 rounded-full">Bellare &rarr; KVG Sullia</button>
         </div>
         <div class="flex items-center gap-2">
-          <span id="waitingStopCount" class="text-xs font-semibold text-slate-600">0 students waiting at selected stop</span>
-          <button onclick="toggleWaitingBeacon()" id="waitBtn" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3 py-1.5 rounded-lg transition">
+          <span id="waitingStopCount" class="text-xs font-semibold text-slate-600">0 students waiting</span>
+          <button onclick="toggleWaitingBeacon()" id="waitBtn" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3 py-1.5 rounded-xl transition">
             I'm Waiting at This Stop
           </button>
         </div>
       </div>
     </section>
 
-    <!-- AI Commute Advisor Banner -->
-    <section id="aiAdvisorBox" class="bg-gradient-to-r from-indigo-900 to-slate-900 text-white rounded-2xl p-4 shadow flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+    <!-- AI COMMUTE ADVISOR -->
+    <section class="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl p-4 shadow flex flex-wrap items-center justify-between gap-3">
       <div>
-        <div class="text-xs font-bold uppercase tracking-wider text-indigo-300 mb-1">AI Last-Mile Commute Advisor</div>
-        <p id="aiAdvisorText" class="text-sm text-slate-100">Select your village stop and college to analyze live ETM crowd loads, skip-stop risks, and backup routes.</p>
+        <div class="text-[11px] font-bold uppercase tracking-wider text-cyan-300">AI Last-Mile Crisis &amp; Commute Advisor</div>
+        <p id="aiAdvisorText" class="text-sm text-slate-100 mt-0.5"></p>
       </div>
-      <div class="text-xs text-slate-300 shrink-0 bg-white/10 px-3 py-2 rounded-xl">
-        <div>Active Routes: <b id="statRoutes">50</b> | Colleges: <b id="statColleges">52</b></div>
-      </div>
+      <div id="effectiveTargetBadge" class="text-xs bg-white/10 border border-white/15 px-3 py-2 rounded-xl font-semibold"></div>
     </section>
 
-    <!-- Results + Live GPS Map Grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      <!-- Left: Route Results & Backups -->
+    <!-- RESULTS + LIVE GPS MAP -->
+    <div id="resultsSection" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
       <div class="lg:col-span-7 space-y-5">
         <div>
           <div class="flex items-center justify-between mb-2">
-            <h2 class="font-bold text-lg text-slate-900">All Direct Buses</h2>
+            <h3 class="font-extrabold text-base text-slate-900">All Direct Buses</h3>
             <span id="directCount" class="text-xs font-semibold text-slate-500"></span>
           </div>
           <div id="directResults" class="space-y-3"></div>
@@ -168,28 +411,29 @@
 
         <div>
           <div class="flex items-center justify-between mb-2">
-            <h2 class="font-bold text-lg text-slate-900">Backup & Alternative 1-Transfer Routes</h2>
-            <span class="text-xs text-slate-500">Auto-suggested if direct buses are full/cancelled</span>
+            <h3 class="font-extrabold text-base text-slate-900">Alternative &amp; 1-Transfer Backup Routes</h3>
+            <span class="text-xs text-slate-500">Auto-updated during breakdowns &amp; road floods</span>
           </div>
           <div id="backupResults" class="space-y-3"></div>
         </div>
       </div>
 
-      <!-- Right: Live GPS Map + Fleet Telemetry -->
-      <div class="lg:col-span-5 space-y-4">
-        <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm sticky top-20">
+      <!-- Live Map -->
+      <div id="mapSection" class="lg:col-span-5">
+        <div class="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm sticky top-20">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="font-bold text-base text-slate-900">Live Dakshina Kannada GPS Map</h2>
-            <span class="text-xs text-emerald-600 font-semibold">Updating every 2s</span>
+            <h3 class="font-extrabold text-base text-slate-900">Live Dakshina Kannada GPS Map</h3>
+            <span class="text-xs text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 pulse-dot"></span> Live 2s</span>
           </div>
           <div id="map"></div>
-          <div class="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
-            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> Empty (&lt;100%)</span>
-            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Moderate (100–140%)</span>
-            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-rose-600 inline-block"></span> Crowded (&gt;140%)</span>
+          <div class="mt-3 flex flex-wrap gap-3 text-[11px] text-slate-600 font-medium">
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Empty (&lt;100%)</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Moderate (100–140%)</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-600"></span> Crowded (&gt;140%)</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-1 bg-rose-600 inline-block"></span> Flooded Road</span>
           </div>
-          <div id="selectedBusDetail" class="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600">
-            Click any bus card or map marker to inspect live GPS stop progress, ETM vs. Bus Pass breakdown, and route polyline.
+          <div id="selectedBusDetail" class="mt-3 p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600">
+            Tap any bus card or map pin to inspect live GPS segment, spare/detour status, and ETM vs. Pass breakdown.
           </div>
         </div>
       </div>
